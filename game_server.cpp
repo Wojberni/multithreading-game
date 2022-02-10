@@ -486,15 +486,14 @@ void Server::add_collectible(int x, int y, int value){
 void Server::move_beasts() {
 
 }
-
+/*
 int main(){
     Server server = Server();
     server.start();
-}
+}*/
 
 
 // testing
-/*
 
 void *starting(void *param) {
     int *temp = (int*) param;
@@ -565,4 +564,4 @@ int main(){
         pthread_create(&tid[i], NULL, starting, &client_socket[i]);
         i++;
     }
-}*/
+}

@@ -25,7 +25,7 @@ class Server {
     int rows = 0, columns = 0;
     char board[BOARD_ROWS][BOARD_COLS] = {FREE};
 
-    Client clients[CLIENT_LIMIT];
+    client_struct clients[CLIENT_LIMIT];
     bool connected_clients[CLIENT_LIMIT] = {false};
     int server_PID = 0;
     int round_number = 0;

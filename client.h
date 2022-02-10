@@ -1,11 +1,11 @@
-#ifndef __CLIENT__
-#define __CLIENT__
+#ifndef __CLIENT_STRUCT__
+#define __CLIENT_STRUCT__
 
 #include "point.h"
 
-struct Client{
-    int player_id;
-    int client_port;
+struct client_struct{
+    int player_id = 0;
+    int client_port = 0;
     int coins_carried = 0;
     int coins_brought = 0;
     int deaths = 0;

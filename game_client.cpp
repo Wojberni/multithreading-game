@@ -5,12 +5,18 @@
 #include <stdlib.h>
 
 Client::Client() {
+
+}
+
+int Client::init(){
     init_window();
     if(!has_colors() || check_size_terminal()){
-        printf("Invalid size of terminal (min.%dx%d) or no colors support!\nCheck you terminal preferences!\n"
+        printw("Invalid size of terminal (min.%dx%d) or no colors support!\nCheck you terminal preferences!\n"
                 , MARGIN_SCOREBOARD + SCOREBOARD_WIDTH, BOARD_ROWS);
+        return EXIT_FAILURE;
     }
     init_colors();
+    return EXIT_SUCCESS;
 }
 
 Client::~Client() {
@@ -55,7 +61,6 @@ int Client::connection() {
     int connection_status = connect(network_socket,(struct sockaddr*)&server_address, sizeof(server_address));
 
     if (connection_status == SOCKET_ERROR) {
-        puts("Error\n");
         return EXIT_FAILURE;
     }
     return EXIT_SUCCESS;
@@ -201,13 +206,17 @@ void Client::play_game() {
 
 int main(){
 
-    Client client = Client();
-    int check = client.connection();
-    if(check == EXIT_FAILURE){
-        printf("Error connecting to the server!\n");
+    Client *client = new Client();
+    if(client->init() == EXIT_FAILURE){
+        printw("Error initializing client!\n");
         return EXIT_FAILURE;
     }
-    client.play_game();
+    if(client->connection() == EXIT_FAILURE){
+        printw("Error connecting to the server!\n");
+        return EXIT_FAILURE;
+    }
+    client->play_game();
+    delete client;
     return 0;
 }
 

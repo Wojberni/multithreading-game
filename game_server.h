@@ -5,6 +5,7 @@
 #include "client.h"
 #include <netinet/in.h>
 #include <vector>
+#include <thread>
 
 #define SOCKET_ERROR -1
 #define SERVER_PORT 8989
@@ -37,6 +38,8 @@ class Server {
         Server();
         ~Server();
         void start();
+        int init();
+        void handle_clients(Server *server);
 
 private:
     void init_window();
@@ -53,6 +56,8 @@ private:
     void add_collectible(int value);
     void add_collectible(int x, int y, int value);
     void move_beasts();
+    void connect_client(int client_id, int socket_id);
+    int find_free_client();
     //int handle_event(int input);
 };
 

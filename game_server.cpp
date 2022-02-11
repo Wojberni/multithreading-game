@@ -6,16 +6,104 @@
 #include <unistd.h>
 #include <ncurses.h>
 
-Server::Server() { // todo error throwing
-    init_window();
-    if(!has_colors() || check_size_terminal()){
-        printf("Invalid size of terminal (min.%dx%d) or no colors support!\nCheck you terminal preferences!"
-                , MARGIN_SCOREBOARD + SCOREBOARD_WIDTH, BOARD_ROWS);
-    }
-    init_colors();
-    set_board();
+int main(){
+    Server *server = new Server();
+    if(server->init() == EXIT_FAILURE)
+        return EXIT_FAILURE;
+
+    std::thread client_handler(&Server::handle_clients, server, server);
+    std::thread input_server(&Server::start, server);
+
+    client_handler.join();
+    input_server.join();
+
+    delete server;
+    return 0;
+}
+
+Server::Server() {
 
 }
+
+void Server::handle_clients(Server *server){
+    SA_IN server_address;
+    socklen_t address_size;
+
+    int i = 0;
+    int server_socket;
+    SA_IN client_address;
+
+    server_socket = socket(AF_INET, SOCK_STREAM, 0);
+    if(server_socket == SOCKET_ERROR){
+        printw("Failed to create stream!\n");
+        return;
+    }
+
+    // terminating program won't trigger bind failed
+    int enable = 1;
+    if (setsockopt(server_socket, SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(int)) == SOCKET_ERROR)
+        printw("Setsockopt(SO_REUSEADDR) failed!\n");
+
+    server_address.sin_family = AF_INET;
+    server_address.sin_addr.s_addr = INADDR_ANY;
+    server_address.sin_port = htons(SERVER_PORT);
+
+    int result = bind(server_socket, (SA*)&server_address, sizeof(server_address));
+    if(result == SOCKET_ERROR){
+        printw("Bind failed!\n");
+        return;
+    }
+    result = listen(server_socket, SERVER_BACKLOG);
+    if(result == SOCKET_ERROR){
+        printw("Listening failed!\n");
+        return;
+    }
+
+    std::thread thread_pool[4];
+    int client_socket[4] = {0};
+    this->server_PID = server_socket;
+    printw("Waiting for connections...\n");
+
+    while(true){
+        int client_count = count_clients_connected();
+        if(client_count == CLIENT_LIMIT){
+            printw("Cannot connect more clients!\n");
+            continue;
+        }
+        address_size = sizeof(SA_IN);
+        client_socket[i] = accept(server_socket, (SA*)&client_address, (socklen_t*)&address_size);
+        if(client_socket[i] == SOCKET_ERROR){
+            printw("Error connecting client %d to server!", i);
+            return;
+        }
+        printw("Connected %d!\n", client_socket[i]);
+        thread_pool[i] = std::thread(&Server::connect_client, server, i, client_socket[i]);
+        i++;
+    }
+}
+
+void Server::connect_client(int client_id, int socket_id){
+    clients[client_id].player_id = client_id;
+    clients[client_id].client_port = socket_id;
+    //clients[client_id].spawn_position = ;
+    clients[client_id].player_position = clients[client_id].spawn_position;
+    while(true){
+        int choice;
+        int res = recv(socket_id, &choice, sizeof(choice), 0);
+        printw("Client %d entered character: %d\n", client_id, choice);
+        if(res == SOCKET_ERROR){
+            printw("Error reading socket data!");
+            continue;
+        }
+        if(choice == 'q')
+            break;
+        move_player(int client_id, int choice);
+        send(socket_id, &clients[client_id], sizeof(clients[client_id]), 0);
+    }
+    close(socket_id);
+}
+
+void Server::
 
 void Server::start() {
 
@@ -45,6 +133,18 @@ void Server::start() {
 Server::~Server() {
     beasts.clear();
     coins.clear();
+}
+
+int Server::init() {
+    init_window();
+    if(!has_colors() || check_size_terminal()){
+        printf("Invalid size of terminal (min.%dx%d) or no colors support!\nCheck you terminal preferences!"
+                , MARGIN_SCOREBOARD + SCOREBOARD_WIDTH, BOARD_ROWS);
+        return EXIT_FAILURE;
+    }
+    init_colors();
+    set_board();
+    return EXIT_SUCCESS;
 }
 
 void Server::init_window(){
@@ -377,7 +477,7 @@ int Server::count_clients_connected() {
 }
 
 void Server::paint_players(){
-
+    for(auto &x : )
 }
 
 void Server::paint_beasts(){
@@ -486,14 +586,11 @@ void Server::add_collectible(int x, int y, int value){
 void Server::move_beasts() {
 
 }
-/*
-int main(){
-    Server server = Server();
-    server.start();
-}*/
+
 
 
 // testing
+/*
 
 void *starting(void *param) {
     int *temp = (int*) param;
@@ -565,3 +662,4 @@ int main(){
         i++;
     }
 }
+*/

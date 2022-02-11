@@ -29,13 +29,14 @@ class Client{
         ~Client();
         int connection();
         void play_game();
-        void print_scoreboard();
-        void print_board();
+        int init();
 
     private:
         void init_colors();
         bool check_size_terminal();
         void init_window();
+        void print_scoreboard();
+        void print_board();
 
 };
 

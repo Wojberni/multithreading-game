@@ -3,6 +3,23 @@
 #include <arpa/inet.h>
 #include <unistd.h>
 #include <stdlib.h>
+#include <thread>
+
+int main(){
+
+    Client *client = new Client();
+    if(client->init() == EXIT_FAILURE){
+        printw("Error initializing client_info!\n");
+        return EXIT_FAILURE;
+    }
+    if(client->connection() == EXIT_FAILURE){
+        printw("Error connecting to the server!\n");
+        return EXIT_FAILURE;
+    }
+    client->play_game(client);
+    delete client;
+    return 0;
+}
 
 Client::Client() {
 
@@ -16,6 +33,7 @@ int Client::init(){
         return EXIT_FAILURE;
     }
     init_colors();
+    is_connected = true;
     return EXIT_SUCCESS;
 }
 
@@ -70,7 +88,7 @@ void Client::print_board() {
     move(0,0);
     for (int i = 0; i < CLIENT_ROWS; i++) {
         for (int j = 0; j < CLIENT_COLS; j++) {
-            switch(board[i][j]){
+            switch(client_info.player_board[i][j]){
                 case FREE:
                     attron(COLOR_PAIR(TEXT_COLOR));
                     addch(' ');
@@ -111,6 +129,31 @@ void Client::print_board() {
                     addch('A');
                     attroff(COLOR_PAIR(CAMPSITE_COLOR));
                     break;
+                case BEAST:
+                    attron(COLOR_PAIR(TEXT_COLOR));
+                    addch('*');
+                    attroff(COLOR_PAIR(TEXT_COLOR));
+                    break;
+                case PLAYER1:
+                    attron(COLOR_PAIR(PLAYER_COLOR));
+                    addch('1');
+                    attroff(COLOR_PAIR(PLAYER_COLOR));
+                    break;
+                case PLAYER2:
+                    attron(COLOR_PAIR(PLAYER_COLOR));
+                    addch('2');
+                    attroff(COLOR_PAIR(PLAYER_COLOR));
+                    break;
+                case PLAYER3:
+                    attron(COLOR_PAIR(PLAYER_COLOR));
+                    addch('3');
+                    attroff(COLOR_PAIR(PLAYER_COLOR));
+                    break;
+                case PLAYER4:
+                    attron(COLOR_PAIR(PLAYER_COLOR));
+                    addch('4');
+                    attroff(COLOR_PAIR(PLAYER_COLOR));
+                    break;
             }
         }
         addch('\n');
@@ -119,9 +162,9 @@ void Client::print_board() {
 }
 
 void Client::print_scoreboard(){
-    mvprintw(0, MARGIN_SCOREBOARD, "Server PID: %d", 1370);
+    mvprintw(0, MARGIN_SCOREBOARD, "Server PID: %d", client_info.server_pid);
     mvprintw(1, MARGIN_SCOREBOARD, "Campsite X/Y: unknown");
-    mvprintw(2, MARGIN_SCOREBOARD, "Round number: %d", 3324);
+    mvprintw(2, MARGIN_SCOREBOARD, "Round number: %d", client_info.round_nr);
     mvprintw(4, MARGIN_SCOREBOARD, "Player:");
     mvprintw(5, MARGIN_SCOREBOARD+2, "Number");
     mvprintw(6, MARGIN_SCOREBOARD+2, "Type");
@@ -130,12 +173,12 @@ void Client::print_scoreboard(){
     mvprintw(10, MARGIN_SCOREBOARD+2, "Coins carried");
     mvprintw(11, MARGIN_SCOREBOARD+2, "Coins brought");
 
-    mvprintw(5, MARGIN_SCOREBOARD+15, "%d", client.player_id);
-    mvprintw(6, MARGIN_SCOREBOARD+15, "HUMAN");
-    mvprintw(7, MARGIN_SCOREBOARD+15, "%d/%d", client.player_position.x, client.player_position.y);
-    mvprintw(8, MARGIN_SCOREBOARD+15, "%d", client.deaths);
-    mvprintw(10, MARGIN_SCOREBOARD+15, "%d", client.coins_carried);
-    mvprintw(11, MARGIN_SCOREBOARD+15, "%d", client.coins_brought);
+    mvprintw(5, MARGIN_SCOREBOARD+16, "%d", client_info.player_id);
+    mvprintw(6, MARGIN_SCOREBOARD+16, "HUMAN");
+    mvprintw(7, MARGIN_SCOREBOARD+16, "%d/%d", client_info.player.left.x, client_info.player.left.y);
+    mvprintw(8, MARGIN_SCOREBOARD+16, "%d", client_info.deaths);
+    mvprintw(10, MARGIN_SCOREBOARD+16, "%d", client_info.coins_carried);
+    mvprintw(11, MARGIN_SCOREBOARD+16, "%d", client_info.coins_brought);
 
     mvprintw(13, MARGIN_SCOREBOARD, "Legend:");
 
@@ -187,38 +230,34 @@ void Client::print_scoreboard(){
     refresh();
 }
 
-void Client::play_game() {
+void Client::play_game(Client *client) {
     print_board();
     print_scoreboard();
-    while(true){
+    std::thread receiver(&Client::receiver, client);
+    receiver.detach();
+    while(is_connected){
         int input = getch();
         flushinp();
         send(network_socket, &input, sizeof(input), 0);
-        if(input == 'q' || input == 'Q')
+        if(input == 'q' || input == 'Q'){
+            is_connected = false;
             break;
-        recv(network_socket, &client, sizeof(client), 0);
-        print_board();
-        print_scoreboard();
-        sleep(1);
+        }
     }
     close(network_socket);
 }
 
-int main(){
-
-    Client *client = new Client();
-    if(client->init() == EXIT_FAILURE){
-        printw("Error initializing client!\n");
-        return EXIT_FAILURE;
+void Client::receiver(){
+    while(is_connected){
+        int res = recv(network_socket, &client_info, sizeof(struct client_struct), 0);
+        if(res == SOCKET_ERROR){
+            continue;
+        }
+        print_board();
+        print_scoreboard();
     }
-    if(client->connection() == EXIT_FAILURE){
-        printw("Error connecting to the server!\n");
-        return EXIT_FAILURE;
-    }
-    client->play_game();
-    delete client;
-    return 0;
 }
+/*
 
 
 void *thread_client(void *param){
@@ -239,7 +278,7 @@ void *thread_client(void *param){
 
     //printf("Connection established %d!\n", network_socket);
 
-    char test[5][10];
+    client_struct client_temp;
     while(true){
         //printf("Enter a character!: ");
         int input = getch();
@@ -247,10 +286,23 @@ void *thread_client(void *param){
         send(network_socket, &input, sizeof(input), 0);
         if(input == 'q' || input == 'Q')
             break;
-        recv(network_socket, &test, sizeof(test), 0);
-        mvprintw(3,0, "%d %d %d", test[0][0], test[1][0], test[2][0]);
+        recv(network_socket, &client_temp, sizeof(client_temp), 0);
+        mvprintw(3,0, "%d %d %d", client_temp.deaths, client_temp.coins_brought, client_temp.coins_carried);
     }
 
     close(network_socket);
     return NULL;
 }
+
+int main(){
+    initscr();
+    cbreak();
+    keypad(stdscr, TRUE);
+    noecho();
+    //nodelay(stdscr, TRUE); // disable waiting for input
+    curs_set(0);
+    pthread_t tid;
+    pthread_create(&tid, NULL, thread_client, NULL);
+    pthread_join(tid, NULL);
+    return 0;
+};*/

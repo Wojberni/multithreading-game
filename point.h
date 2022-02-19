@@ -29,7 +29,7 @@ struct MovingObject
 {
     Point left;
     Point right;
-    MovingObject(int _x, int _y): left(_x, _y), right(_x + 1, _y) {};
+    MovingObject(int _x=0, int _y=0): left(_x, _y), right(_x + 1, _y) {};
 
     MovingObject& operator+=(const Point& delta)
     {
@@ -38,6 +38,14 @@ struct MovingObject
         right.x += delta.x;
         right.y += delta.y;
         return *this;
+    }
+
+    bool operator==(const MovingObject& second)
+    {
+        if(this->left.x == second.left.x && this->left.y == second.left.y
+        && this->right.x == second.right.x && this->right.y == second.right.y)
+            return true;
+        return false;
     }
 };
 

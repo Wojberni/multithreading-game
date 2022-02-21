@@ -3,9 +3,9 @@
 
 #include <semaphore.h>
 #include "client_struct.h"
-#include <netinet/in.h>
 #include <vector>
 #include <thread>
+#include <netinet/in.h>
 
 #define SOCKET_ERROR -1
 #define SERVER_PORT 8989
@@ -33,6 +33,8 @@ class Server {
     bool server_running = true;
     int server_PID = 0;
     int round_number = 0;
+    sem_t client_sem, beast_sem, client_count, beast_count;
+    pthread_mutex_t data;
     std::vector<Collectible> coins;
     std::vector<MovingObject> beasts;
     std::vector<std::thread> threads_beast;
@@ -74,6 +76,9 @@ private:
     void check_beast_collision(MovingObject &beast, int player_id);
     void check_for_collisions(int client_id);
     void collect_collectible(int client_id);
+    void set_player_after_collision(int client_id);
+    void add_coins(int client_id);
+    void set_semaphores();
 };
 
 #endif

@@ -1,8 +1,6 @@
 #include "game_server.h"
 #include <stdio.h>
 #include <stdlib.h>
-#include <pthread.h>
-#include <semaphore.h>
 #include <unistd.h>
 #include <ncurses.h>
 
@@ -14,8 +12,8 @@ int main(){
     std::thread client_handler(&Server::handle_clients, server, server);
     std::thread input_server(&Server::start, server, server);
 
+    client_handler.detach();
     input_server.join();
-    client_handler.join();
 
     delete server;
     return 0;
@@ -65,6 +63,7 @@ void Server::handle_clients(Server *server){
     while(server_running){
         int i = get_first_free_client();
         if(i == -1){
+            sleep(1);
             continue;
         }
         else{
@@ -86,7 +85,8 @@ void Server::connect_client(Server *server, int client_id, int socket_id){
     set_client(client_id, socket_id);
     std::thread sender(&Server::send_data, server, client_id);
     sender.detach();
-    while(connected_clients[client_id]){
+    //sem_post(&client_count);
+    while(connected_clients[client_id] && server_running){
         int choice;
         int res = recv(socket_id, &choice, sizeof(choice), 0);
         if(res == SOCKET_ERROR){
@@ -100,8 +100,16 @@ void Server::connect_client(Server *server, int client_id, int socket_id){
         move_player(client_id, choice);
         collect_collectible(client_id);
         check_for_collisions(client_id);
+        add_coins(client_id);
     }
     close(socket_id);
+}
+
+void Server::add_coins(int client_id){
+    if(clients[client_id].player.left == campfire && clients[client_id].coins_carried){
+        clients[client_id].coins_brought += clients[client_id].coins_carried;
+        clients[client_id].coins_carried = 0;
+    }
 }
 
 void Server::collect_collectible(int client_id) {
@@ -120,14 +128,33 @@ void Server::collect_collectible(int client_id) {
 void Server::check_for_collisions(int client_id) {
     for(int i = 0; i < CLIENT_LIMIT; i++){
         if(i != client_id && connected_clients[i]){
-
+            if(clients[i].player.left.y == clients[client_id].player.left.y){
+                if(clients[i].player == clients[client_id].player ||
+                   clients[i].player.left.x == clients[client_id].player.right.x ||
+                   clients[i].player.right.x == clients[client_id].player.left.x){
+                    clients[i].coins_carried += clients[client_id].coins_carried;
+                    clients[client_id].coins_carried = 0;
+                    set_player_after_collision(i);
+                    set_player_after_collision(client_id);
+                }
+            }
         }
     }
 }
 
+void Server::set_player_after_collision(int client_id){
+    clients[client_id].deaths += 1;
+    add_collectible(clients[client_id].player.left.x, clients[client_id].player.left.y, clients[client_id].coins_carried);
+    clients[client_id].coins_carried = 0;
+    clients[client_id].player.left = clients[client_id].spawn_position;
+    clients[client_id].player.right = clients[client_id].spawn_position + Point(1, 0);
+    clients[client_id].slowed = false;
+}
+
 void Server::send_data(int client_id){
-    while(connected_clients[client_id]){
+    while(connected_clients[client_id] && server_running){
         set_client_board(client_id);
+        clients[client_id].round_nr = round_number;
         send(clients[client_id].client_port, &clients[client_id], sizeof(struct client_struct), 0);
         sleep(1);
     }
@@ -213,7 +240,7 @@ void Server::move_player(int client_id, int input){
     }
     left = clients[client_id].player.left + point;
     right = clients[client_id].player.right + point;
-    switch (input) { // todo dodanie kolizji z bestiami i graczami, slow z busha i zbieranie coinow i oddawanie (campsite)
+    switch (input) {
         case KEY_UP:
         case KEY_DOWN:
             if(board[left.y][left.x] != WALL && board[right.y][right.x] != WALL){
@@ -291,8 +318,11 @@ void Server::new_round(){
 }
 
 Server::~Server() {
-    beasts.clear();
-    coins.clear();
+    sem_destroy(&client_sem);
+    sem_destroy(&beast_sem);
+    sem_destroy(&client_count);
+    sem_destroy(&beast_count);
+    pthread_mutex_destroy(&data);
 }
 
 int Server::init() {
@@ -305,8 +335,17 @@ int Server::init() {
     init_colors();
     set_board();
     set_campsite();
+    set_semaphores();
     server_running = true;
     return EXIT_SUCCESS;
+}
+
+void Server::set_semaphores(){
+    sem_init(&client_sem, 0 , 0);
+    sem_init(&beast_sem, 0 , 0);
+    sem_init(&client_count, 0 , 0);
+    sem_init(&beast_count, 0 , 0);
+    pthread_mutex_init(&data, NULL);
 }
 
 void Server::set_campsite(){
@@ -354,7 +393,7 @@ void Server::set_board() {
             }
             else if(i == 2){
                 if( (j >= 3 && j <= 6) || j == 9 || (j >= 12 && j <= 18) || (j >= 21 && j <= 48) ||
-                    (j >= 51 && j <= 61))
+                    (j >= 51 && j <= 60))
                     board[i][j] = WALL;
             }
             else if(i == 3){
@@ -368,18 +407,17 @@ void Server::set_board() {
                     board[i][j] = WALL;
             }
             else if(i == 5){
-                if(j == 6 || j == 9 || j == 15 || j == 24 || j == 30 || j == 33 ||
+                if(j == 6 || j == 9 || j == 15 || j == 24 || j == 30 ||
                    j == 45 || j == 48 || j == 54 || j == 60)
                     board[i][j] = WALL;
             }
             else if(i == 6){
                 if( (j >= 3 && j <= 6) || j == 9 || (j >= 12 && j <= 15) || (j >= 18 && j <= 36) ||
-                    (j >= 39 && j <= 45) || (j >= 48 && j <= 57) || j == 60 )
+                    (j >= 39 && j <= 45) || j == 48 ||(j >= 51 && j <= 57) || j == 60 )
                     board[i][j] = WALL;
             }
             else if(i == 7){
-                if( j == 3 || j == 9 || j == 12 || j == 18 || j == 36 || j == 39 || j == 45
-                    || j == 54)
+                if( j == 3 || j == 18 || j == 36 || j == 39 || j == 54)
                     board[i][j] = WALL;
             }
             else if(i == 8){
@@ -396,13 +434,12 @@ void Server::set_board() {
             }
             else if(i == 10){
                 if( (j >= 3 && j <= 6) || j == 9 || j == 12 || (j >= 15 && j <= 21) ||
-                    (j >= 24 && j <= 27) || j == 30 || (j >= 33 && j <= 48) || j == 51 ||
+                    (j >= 24 && j <= 27) || j == 30 || (j >= 33 && j <= 45) || j == 48 || j == 51 ||
                     (j >= 51 && j <= 62))
                     board[i][j] = WALL;
             }
             else if(i == 11){
-                if( j == 3 || j == 9 || j == 12 || j == 27 || j == 30 || j == 45 ||
-                    j == 48 || j == 60)
+                if( j == 3 || j == 9 || j == 12 || j == 27 || j == 30 || j == 48 || j == 60)
                     board[i][j] = WALL;
             }
             else if(i == 12){
@@ -412,8 +449,7 @@ void Server::set_board() {
                     board[i][j] = WALL;
             }
             else if(i == 13){
-                if(j == 3 || j == 6 || j == 27 || j == 42 || j == 45 || j == 51 || j == 54
-                   || j == 57)
+                if(j == 3 || j == 6 || j == 42 || j == 45 || j == 51 || j == 54 || j == 57)
                     board[i][j] = WALL;
                 if((j >= 14 && j <= 19) )
                     board[i][j] = BUSH;
@@ -424,13 +460,13 @@ void Server::set_board() {
                     board[i][j] = WALL;
             }
             else if(i == 15){
-                if(j == 3 || j == 12 || j == 18 || j == 39 || j == 42 || j == 48 || j == 51
+                if(j == 3 || j == 12 || j == 18 || j == 42 || j == 48 || j == 51
                    || j == 57)
                     board[i][j] = WALL;
             }
             else if(i == 16){
                 if((j >= 3 && j <= 9) || j == 12 || j == 15 || j == 18 || (j >= 21 && j <= 24) ||
-                   (j >= 27 && j <= 33) || (j >= 36 && j <= 42) || j == 45 || j == 48 ||
+                   (j >= 27 && j <= 33) || (j >= 36 && j <= 39) || j == 42 || j == 45 || j == 48 ||
                    (j >= 51 && j <= 54) || j == 57 || (j >= 60 && j <= 62))
                     board[i][j] = WALL;
             }
@@ -454,26 +490,26 @@ void Server::set_board() {
             }
             else if(i == 20){
                 if(j == 3 || j == 6 || (j >= 9 && j <= 21) || (j >= 24 && j <= 27) || j == 30 ||
-                   (j >= 33 && j <= 45) || j == 48 || (j >= 51 && j <= 60))
+                   (j >= 33 && j <= 45) || j == 48 || (j >= 51 && j <= 57) || j == 60)
                     board[i][j] = WALL;
             }
             else if(i == 21){
-                if(j == 3 || j == 27 || j == 30 || j == 36 ||  j == 48  || j == 60)
+                if(j == 3 || j == 27 || j == 30 || j == 60)
                     board[i][j] = WALL;
                 if((j >= 12 && j <= 15) )
                     board[i][j] = BUSH;
             }
             else if(i == 22){
-                if(j == 3 || (j >= 6 && j <= 33) || (j >= 36 && j <= 42) || (j >= 45 && j <= 54) ||
+                if(j == 3 || (j >= 6 && j <= 27) || (j >= 30 && j <= 33) || (j >= 36 && j <= 42) || (j >= 45 && j <= 54) ||
                    (j >= 57 && j <= 60))
                     board[i][j] = WALL;
             }
             else if(i == 23){
-                if(j == 3 || j == 12 || j == 18 || j == 21 || j == 33 || j == 36 || j == 54 || j == 57)
+                if(j == 3 || j == 12 || j == 21 || j == 33 || j == 36 || j == 54 || j == 57)
                     board[i][j] = WALL;
             }
             else if(i == 24){
-                if((j >= 1 && j <= 9) || j == 12 || j == 15 || j == 18 || j == 21 || (j >= 24 && j <= 27)
+                if((j >= 3 && j <= 9) || j == 12 || j == 15 || j == 18 || j == 21 || (j >= 24 && j <= 27)
                    || (j >= 30 && j <= 33) || (j >= 36 && j <= 39) || (j >= 42 && j <= 45) ||
                    (j >= 48 && j <= 54) || j == 57 || (j >= 60 && j <= 62))
                     board[i][j] = WALL;
@@ -502,7 +538,7 @@ void Server::set_board() {
                     board[i][j] = WALL;
             }
             else if(i == 29){
-                if(j == 18 || j == 42 || j == 57)
+                if(j == 18 || j == 42)
                     board[i][j] = WALL;
             }
         }
@@ -579,9 +615,9 @@ void Server::paint_scoreboard(){
             mvprintw(4, MARGIN_SCOREBOARD+15+i*10, "Player %d", i+1);
             mvprintw(5, MARGIN_SCOREBOARD+15+i*10, "%d", clients[i].client_port);
             mvprintw(6, MARGIN_SCOREBOARD+15+i*10, "HUMAN");
-            mvprintw(7, MARGIN_SCOREBOARD+15+i*10, "%d/%d", clients[i].player.left.x, clients[i].player.left.y);
+            mvprintw(7, MARGIN_SCOREBOARD+15+i*10, "%d/%d  ", clients[i].player.left.x, clients[i].player.left.y);
             mvprintw(8, MARGIN_SCOREBOARD+15+i*10, "%d", clients[i].deaths);
-            mvprintw(10, MARGIN_SCOREBOARD+15+i*10, "%d", clients[i].coins_carried);
+            mvprintw(10, MARGIN_SCOREBOARD+15+i*10, "%d  ", clients[i].coins_carried);
             mvprintw(11, MARGIN_SCOREBOARD+15+i*10, "%d", clients[i].coins_brought);
         }
         else{
@@ -708,12 +744,15 @@ void Server::add_beast(Server *server) {
 void Server::move_beast(int x, int y){
     beasts.emplace_back(MovingObject(x, y));
     MovingObject &beast = beasts.back();
+    //sem_post(&beast_count);
     while(server_running){
         int player_id = player_is_seen(beast);
         if(player_id != -1){
             move_towards_player(beast, player_id);
+            //sem_wait(&beast_sem);
             check_beast_collision(beast, player_id);
         }
+        sleep(1);
     }
 }
 
@@ -721,15 +760,11 @@ void Server::check_beast_collision(MovingObject &beast, int player_id){
     if(beast == clients[player_id].player || (beast.left.y == clients[player_id].player.left.y
     && (beast.left.x == clients[player_id].player.right.x || beast.right.x == clients[player_id].player.left.x)))
     {
-        clients[player_id].deaths += 1;
-        add_collectible(clients[player_id].player.left.x, clients[player_id].player.left.y, clients[player_id].coins_carried);
-        clients[player_id].coins_carried = 0;
-        clients[player_id].player.left = clients[player_id].spawn_position;
-        clients[player_id].player.right = clients[player_id].spawn_position + Point(1, 0);
+        set_player_after_collision(player_id);
     }
 }
 
-int Server::player_is_seen(MovingObject &beast){
+int Server::player_is_seen(MovingObject &beast){ // returns which player is the closest one
     int id = -1;
     int min = BOARD_COLS;
     for(int i = 0; i < CLIENT_LIMIT; i++){
@@ -834,10 +869,33 @@ void Server::move_towards_player(MovingObject &beast, int player_id){
             beast += Point(0, -1);
     }
     else if(clients[player_id].player.left.x == beast.right.x){
-        beast += Point(1, 0);
+        if(beast.left.y < clients[player_id].player.left.y){
+            if(board[beast.left.y + 1][beast.left.x] != WALL && board[beast.left.y + 1][beast.right.x] != WALL)
+                beast += Point(0, 1);
+            else
+                beast += Point(1, 0);
+        }
+        else{
+            if(board[beast.left.y - 1][beast.left.x] != WALL && board[beast.left.y - 1][beast.right.x] != WALL)
+                beast += Point(0, -1);
+            else
+                beast += Point(1, 0);
+        }
+
     }
     else if(clients[player_id].player.right.x == beast.left.x){
-        beast += Point(-1, 0);
+        if(beast.left.y < clients[player_id].player.left.y){
+            if(board[beast.left.y + 1][beast.left.x] != WALL && board[beast.left.y + 1][beast.right.x] != WALL)
+                beast += Point(0, 1);
+            else
+                beast += Point(-1, 0);
+        }
+        else{
+            if(board[beast.left.y - 1][beast.left.x] != WALL && board[beast.left.y - 1][beast.right.x] != WALL)
+                beast += Point(0, -1);
+            else
+                beast += Point(-1, 0);
+        }
     }
 }
 
@@ -854,7 +912,7 @@ void Server::add_collectible(int value) {
 }
 
 void Server::add_collectible(int x, int y, int value){
-    if(board[y][x] == FREE && !value){
+    if(board[y][x] == FREE && value){
         coins.emplace_back(Collectible(x, y, value));
         if(value == 1)
             board[y][x] = COIN;
@@ -866,131 +924,3 @@ void Server::add_collectible(int x, int y, int value){
             board[y][x] = TREASURE_DROP;
     }
 }
-
-
-
-// testing
-
-/*void *starting(void *param) {
-    int *temp = (int*) param;
-    client_struct client_temp;
-    client_temp.deaths = 12;
-    client_temp.coins_brought = 20;
-    client_temp.coins_carried = 26;
-    while(true){
-        int choice;
-        int res = recv(*temp, &choice, sizeof(choice), 0);
-        if(res == SOCKET_ERROR){
-            printf("Error reading socket data!");
-            exit(1);
-        }
-        printf("Client %d entered character: %d\n", *temp, choice);
-        if(choice == 'q')
-            break;
-        send(*temp, &client_temp, sizeof(client_temp), 0);
-    }
-    close(*temp);
-    pthread_exit(NULL);
-}*/
-/*
-int main(){
-    SA_IN server_addr;
-    socklen_t addr_size;
-
-    int i = 0;
-    int server_socket;
-    SA_IN client_addr;
-
-    server_socket = socket(AF_INET, SOCK_STREAM, 0);
-    if(server_socket == SOCKET_ERROR){
-        printf("Failed to create stream!");
-        exit(1);
-    }
-
-    // terminating program won't trigger bind failed
-    int enable = 1;
-    if (setsockopt(server_socket, SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(int)) == SOCKET_ERROR)
-        printf("Setsockopt(SO_REUSEADDR) failed!\n");
-
-    server_addr.sin_family = AF_INET;
-    server_addr.sin_addr.s_addr = INADDR_ANY;
-    server_addr.sin_port = htons(SERVER_PORT);
-
-    int result = bind(server_socket, (SA*)&server_addr, sizeof(server_addr));
-    if(result == SOCKET_ERROR){
-        printf("Bind failed!");
-        exit(1);
-    }
-    result = listen(server_socket, SERVER_BACKLOG);
-    if(result == SOCKET_ERROR){
-        printf("Listening failed!");
-        exit(1);
-    }
-
-    pthread_t tid[10];
-    int client_socket[10] = {0};
-    printf("Waiting for connections...\n");
-
-    while(true){
-        addr_size = sizeof(SA_IN);
-        client_socket[i] = accept(server_socket, (SA*)&client_addr, (socklen_t*)&addr_size);
-        if(client_socket[i] == SOCKET_ERROR){
-            printf("Error connecting client_info to server!");
-            exit(1);
-        }
-        printf("Connected %d!\n", client_socket[i]);
-
-        pthread_create(&tid[i], NULL, starting, &client_socket[i]);
-        i++;
-    }
-}*/
-
-
-/*int Server::handle_event(int input){
-    Point point, left, right;
-    switch (input) {
-        case KEY_UP:
-            point.y = -1;
-            break;
-        case KEY_DOWN:
-            point.y = 1;
-            break;
-        case KEY_LEFT:
-            point.x = -1;
-            break;
-        case KEY_RIGHT:
-            point.x = 1;
-            break;
-        default:
-            return 1;
-    }
-    left = position.left + point;
-    right = position.right + point;
-    switch (input) { // todo dodanie kolizji z bestiami i graczami, slow z busha i zbieranie coinow i oddawanie (campsite)
-        case KEY_UP:
-        case KEY_DOWN:
-            if(board[left.y][left.x] != WALL && board[right.y][right.x] != WALL){
-                position.left = left;
-                position.right = right;
-                return 0;
-            }
-            return 1;
-        case KEY_LEFT:
-            if(board[left.y][left.x] != WALL){
-                position.left = left;
-                position.right = right;
-                return 0;
-            }
-            return 1;
-        case KEY_RIGHT:
-            if(board[right.y][right.x] != WALL){
-                position.left = left;
-                position.right = right;
-                return 0;
-            }
-            return 1;
-        default:
-            return 1;
-    }
-    return 1;
-}*/

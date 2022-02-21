@@ -173,11 +173,11 @@ void Client::print_scoreboard(){
     mvprintw(10, MARGIN_SCOREBOARD+2, "Coins carried");
     mvprintw(11, MARGIN_SCOREBOARD+2, "Coins brought");
 
-    mvprintw(5, MARGIN_SCOREBOARD+16, "%d", client_info.player_id);
+    mvprintw(5, MARGIN_SCOREBOARD+16, "%d", client_info.player_id + 1);
     mvprintw(6, MARGIN_SCOREBOARD+16, "HUMAN");
-    mvprintw(7, MARGIN_SCOREBOARD+16, "%d/%d", client_info.player.left.x, client_info.player.left.y);
+    mvprintw(7, MARGIN_SCOREBOARD+16, "%d/%d  ", client_info.player.left.x, client_info.player.left.y);
     mvprintw(8, MARGIN_SCOREBOARD+16, "%d", client_info.deaths);
-    mvprintw(10, MARGIN_SCOREBOARD+16, "%d", client_info.coins_carried);
+    mvprintw(10, MARGIN_SCOREBOARD+16, "%d  ", client_info.coins_carried);
     mvprintw(11, MARGIN_SCOREBOARD+16, "%d", client_info.coins_brought);
 
     mvprintw(13, MARGIN_SCOREBOARD, "Legend:");
@@ -257,52 +257,3 @@ void Client::receiver(){
         print_scoreboard();
     }
 }
-/*
-
-
-void *thread_client(void *param){
-
-    int network_socket = socket(AF_INET,SOCK_STREAM, 0);
-
-    SA_IN server_address;
-    server_address.sin_family = AF_INET;
-    server_address.sin_addr.s_addr = INADDR_ANY;
-    server_address.sin_port = htons(SERVER_PORT);
-
-    int connection_status = connect(network_socket,(struct sockaddr*)&server_address, sizeof(server_address));
-
-    if (connection_status == SOCKET_ERROR) {
-        puts("Error\n");
-        return NULL;
-    }
-
-    //printf("Connection established %d!\n", network_socket);
-
-    client_struct client_temp;
-    while(true){
-        //printf("Enter a character!: ");
-        int input = getch();
-        flushinp();
-        send(network_socket, &input, sizeof(input), 0);
-        if(input == 'q' || input == 'Q')
-            break;
-        recv(network_socket, &client_temp, sizeof(client_temp), 0);
-        mvprintw(3,0, "%d %d %d", client_temp.deaths, client_temp.coins_brought, client_temp.coins_carried);
-    }
-
-    close(network_socket);
-    return NULL;
-}
-
-int main(){
-    initscr();
-    cbreak();
-    keypad(stdscr, TRUE);
-    noecho();
-    //nodelay(stdscr, TRUE); // disable waiting for input
-    curs_set(0);
-    pthread_t tid;
-    pthread_create(&tid, NULL, thread_client, NULL);
-    pthread_join(tid, NULL);
-    return 0;
-};*/

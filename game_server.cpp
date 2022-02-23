@@ -6,8 +6,10 @@
 
 int main(){
     Server *server = new Server();
-    if(server->init() == EXIT_FAILURE)
+    if(server->init() == EXIT_FAILURE){
+        delete server;
         return EXIT_FAILURE;
+    }
 
     std::thread client_handler(&Server::handle_clients, server, server);
     std::thread input_server(&Server::start, server, server);
@@ -57,27 +59,24 @@ void Server::handle_clients(Server *server){
     }
 
     std::thread thread_pool[4];
-    int client_socket[4] = {0};
     this->server_PID = server_socket;
 
     while(server_running){
-        int i = get_first_free_client();
-        if(i == -1){
-            sleep(1);
+        address_size = sizeof(SA_IN);
+        int socket_client = accept(server_socket, (SA *) &client_address, (socklen_t *) &address_size);
+        if (socket_client == SOCKET_ERROR){
+            printw("Error connecting client %d to server!", socket_client);
             continue;
         }
-        else{
-            address_size = sizeof(SA_IN);
-            client_socket[i] = accept(server_socket, (SA*)&client_address, (socklen_t*)&address_size);
-            if(client_socket[i] == SOCKET_ERROR){
-                printw("Error connecting client %d to server!", i);
-                continue;
-            }
+        int i = get_first_free_client();
+        if (i != -1) {
             connected_clients[i] = true;
-            thread_pool[i] = std::thread(&Server::connect_client, server, server, i, client_socket[i]);
+            thread_pool[i] = std::thread(&Server::connect_client, server, server, i, socket_client);
             thread_pool[i].detach();
         }
-
+        else{
+            close(socket_client);
+        }
     }
 }
 
@@ -120,7 +119,7 @@ void Server::collect_collectible(int client_id) {
     int client_x1 = clients[client_id].player.left.x;
     int client_x2 = clients[client_id].player.right.x;
     int client_y = clients[client_id].player.left.y;
-    for(int i = 0; i < coins.size(); i++){
+    for(int i = 0; i < (int)coins.size(); i++){
         if(coins[i].point == Point(client_x1, client_y) || coins[i].point == Point(client_x2, client_y)){
             clients[client_id].coins_carried += coins[i].value;
             board[coins[i].point.y][coins[i].point.x] = FREE;
@@ -170,15 +169,7 @@ void Server::set_client(int client_id, int socket_id){
     clients[client_id].round_nr = round_number;
     clients[client_id].player_id = client_id;
     clients[client_id].client_port = socket_id;
-    while(true){
-        int x = rand() % (BOARD_COLS - 2) + 1;
-        int y = rand() % (BOARD_ROWS - 2) + 1;
-        if(board[y][x] == FREE && board[y][x+1] == FREE){
-            clients[client_id].spawn_position.y = y;
-            clients[client_id].spawn_position.x = x;
-            break;
-        }
-    }
+    clients[client_id].spawn_position = get_free_spot();
     clients[client_id].player.left = clients[client_id].spawn_position;
     clients[client_id].player.right = clients[client_id].spawn_position + Point(1, 0);
     clients[client_id].coins_carried = 0;
@@ -320,7 +311,7 @@ void Server::move_players() {
 }
 
 void Server::move_beasts() {
-    for(int i = 0; i < beasts.size(); i++){
+    for(int i = 0; i < (int)beasts.size(); i++){
         sem_post(&beast_start);
         sem_wait(&beast_end);
     }
@@ -364,6 +355,7 @@ Server::~Server() {
     sem_destroy(&clients_end[1]);
     sem_destroy(&clients_end[2]);
     sem_destroy(&clients_end[3]);
+    endwin();
 }
 
 int Server::init() {
@@ -904,10 +896,28 @@ void Server::move_towards_player(MovingObject &beast, int player_id){
             beast += Point(-1, 0);
     }
     else if(clients[player_id].player.left.x == beast.left.x){
-        if(beast.left.y < clients[player_id].player.left.y)
-            beast += Point(0, 1);
-        else
-            beast += Point(0, -1);
+        if(beast.left.y < clients[player_id].player.left.y){
+            if(board[beast.left.y + 1][beast.left.x] != WALL && board[beast.left.y + 1][beast.right.x] != WALL){
+                beast += Point(0, 1);
+            }
+            else if(board[beast.left.y + 1][beast.left.x] != WALL){
+                beast += Point(-1, 0);
+            }
+            else if(board[beast.left.y + 1][beast.right.x] != WALL){
+                beast += Point(1, 0);
+            }
+        }
+        else{
+            if(board[beast.left.y - 1][beast.left.x] != WALL && board[beast.left.y - 1][beast.right.x] != WALL){
+                beast += Point(0, -1);
+            }
+            else if(board[beast.left.y - 1][beast.left.x] != WALL){
+                beast += Point(-1, 0);
+            }
+            else if(board[beast.left.y - 1][beast.right.x] != WALL){
+                beast += Point(1, 0);
+            }
+        }
     }
     else if(clients[player_id].player.left.x == beast.right.x){
         if(beast.left.y < clients[player_id].player.left.y){
@@ -965,7 +975,7 @@ Point Server::get_free_spot() {
     int x = rand() % (BOARD_COLS - 2) + 1;
     int y = rand() % (BOARD_ROWS - 2) + 1;
     Point spot = Point(x, y);
-    Point spot_right = spot += Point(1, 0);
+    Point spot_right = Point(x+1, y);
     if(board[y][x] != FREE || board[y][x+1] != FREE)
         return get_free_spot();
     for(int i = 0; i < CLIENT_LIMIT; i++){
@@ -977,11 +987,6 @@ Point Server::get_free_spot() {
     }
     for(auto &beast : beasts){
         if(spot == beast.left || spot == beast.right || spot_right == beast.left){
-            return get_free_spot();
-        }
-    }
-    for(auto &coin : coins){
-        if(spot == coin.point || spot_right == coin.point){
             return get_free_spot();
         }
     }

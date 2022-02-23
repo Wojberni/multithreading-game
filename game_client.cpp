@@ -9,10 +9,12 @@ int main(){
     Client *client = new Client();
     if(client->init() == EXIT_FAILURE){
         printw("Error initializing client_info!\n");
+        delete client;
         return EXIT_FAILURE;
     }
     if(client->connection() == EXIT_FAILURE){
         printw("Error connecting to the server!\n");
+        delete client;
         return EXIT_FAILURE;
     }
     client->play_game(client);
@@ -37,7 +39,7 @@ int Client::init(){
 }
 
 Client::~Client() {
-
+    endwin();
 }
 
 void Client::init_window() {
@@ -237,15 +239,15 @@ void Client::print_scoreboard(){
 }
 
 void Client::play_game(Client *client) {
-    clear_board();
-    print_board();
-    print_scoreboard();
     std::thread receiver(&Client::receiver, client);
     receiver.detach();
     while(is_connected){
         int input = getch();
         flushinp();
-        send(network_socket, &input, sizeof(input), 0);
+        long check = send(network_socket, &input, sizeof(input), 0);
+        if(check == -1){
+            printw("Error sending to server!\n");
+        }
         if(input == 'q' || input == 'Q'){
             is_connected = false;
             break;
@@ -258,6 +260,7 @@ void Client::receiver(){
     while(is_connected){
         int res = recv(network_socket, &client_info, sizeof(struct client_struct), 0);
         if(res == SOCKET_ERROR){
+            printw("Receiving socket error!\n");
             continue;
         }
         clear_board();

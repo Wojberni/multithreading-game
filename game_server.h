@@ -33,8 +33,10 @@ class Server {
     bool server_running = true;
     int server_PID = 0;
     int round_number = 0;
-    sem_t client_sem, beast_sem, client_count, beast_count;
-    pthread_mutex_t data;
+    sem_t beast_start, beast_end;
+    sem_t send_start, send_end;
+    sem_t clients_start[CLIENT_LIMIT];
+    sem_t clients_end[CLIENT_LIMIT];
     std::vector<Collectible> coins;
     std::vector<MovingObject> beasts;
     std::vector<std::thread> threads_beast;
@@ -63,7 +65,7 @@ private:
     void add_collectible(int x, int y, int value);
     void set_client(int client_id, int socket_id);
     void connect_client(Server *server, int client_id, int socket_id);
-    void move_player(int client_id, int input);
+    bool move_player(int client_id, int input);
     int get_first_free_client();
     void new_round();
     void set_campsite();
@@ -79,6 +81,10 @@ private:
     void set_player_after_collision(int client_id);
     void add_coins(int client_id);
     void set_semaphores();
+    void move_beasts();
+    void move_players();
+    void send_all_data();
+    Point get_free_spot();
 };
 
 #endif

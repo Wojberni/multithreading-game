@@ -1,8 +1,7 @@
 #include "game_client.h"
 #include <ncurses.h>
-#include <arpa/inet.h>
 #include <unistd.h>
-#include <stdlib.h>
+#include <cstdlib>
 #include <thread>
 
 int main(){
@@ -46,7 +45,6 @@ void Client::init_window() {
     cbreak();
     keypad(stdscr, TRUE);
     noecho();
-    //nodelay(stdscr, TRUE); // disable waiting for input
     curs_set(0);
 }
 
@@ -85,9 +83,17 @@ int Client::connection() {
 }
 
 void Client::print_board() {
-    move(0,0);
+    int first_x = client_info.player.left.x - CLIENT_COLS / 2 + 1;
+    int first_y = client_info.player.left.y - CLIENT_ROWS / 2;
     for (int i = 0; i < CLIENT_ROWS; i++) {
+        if(first_y + i < 0 || first_y + i >= BOARD_ROWS){
+            continue;
+        }
         for (int j = 0; j < CLIENT_COLS; j++) {
+            if(first_x + j < 0 || first_x + j >= BOARD_COLS){
+                continue;
+            }
+            move(first_y + i, first_x + j);
             switch(client_info.player_board[i][j]){
                 case FREE:
                     attron(COLOR_PAIR(TEXT_COLOR));
@@ -231,6 +237,7 @@ void Client::print_scoreboard(){
 }
 
 void Client::play_game(Client *client) {
+    clear_board();
     print_board();
     print_scoreboard();
     std::thread receiver(&Client::receiver, client);
@@ -253,7 +260,17 @@ void Client::receiver(){
         if(res == SOCKET_ERROR){
             continue;
         }
+        clear_board();
         print_board();
         print_scoreboard();
     }
+}
+
+void Client::clear_board() {
+    for(int i = 0; i < BOARD_ROWS; i++){
+        for(int j = 0; j < BOARD_COLS; j++){
+            mvprintw(i, j, " ");
+        }
+    }
+    refresh();
 }

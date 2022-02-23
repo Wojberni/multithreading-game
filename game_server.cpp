@@ -1,6 +1,6 @@
 #include "game_server.h"
-#include <stdio.h>
-#include <stdlib.h>
+#include <cstdio>
+#include <cstdlib>
 #include <unistd.h>
 #include <ncurses.h>
 
@@ -70,7 +70,7 @@ void Server::handle_clients(Server *server){
             address_size = sizeof(SA_IN);
             client_socket[i] = accept(server_socket, (SA*)&client_address, (socklen_t*)&address_size);
             if(client_socket[i] == SOCKET_ERROR){
-                printw("Error connecting client_info %d to server!", i);
+                printw("Error connecting client %d to server!", i);
                 continue;
             }
             connected_clients[i] = true;
@@ -85,7 +85,6 @@ void Server::connect_client(Server *server, int client_id, int socket_id){
     set_client(client_id, socket_id);
     std::thread sender(&Server::send_data, server, client_id);
     sender.detach();
-    //sem_post(&client_count);
     while(connected_clients[client_id] && server_running){
         int choice;
         int res = recv(socket_id, &choice, sizeof(choice), 0);
@@ -97,10 +96,15 @@ void Server::connect_client(Server *server, int client_id, int socket_id){
             connected_clients[client_id] = false;
             break;
         }
-        move_player(client_id, choice);
-        collect_collectible(client_id);
-        check_for_collisions(client_id);
-        add_coins(client_id);
+        if(move_player(client_id, choice)){
+            clients[client_id].isMoving = true;
+            sem_wait(&clients_start[client_id]);
+            collect_collectible(client_id);
+            check_for_collisions(client_id);
+            add_coins(client_id);
+            clients[client_id].isMoving = false;
+            sem_post(&clients_end[client_id]);
+        }
     }
     close(socket_id);
 }
@@ -125,7 +129,7 @@ void Server::collect_collectible(int client_id) {
     }
 }
 
-void Server::check_for_collisions(int client_id) {
+void Server::check_for_collisions(int client_id) { // check players bumping on each other
     for(int i = 0; i < CLIENT_LIMIT; i++){
         if(i != client_id && connected_clients[i]){
             if(clients[i].player.left.y == clients[client_id].player.left.y){
@@ -153,10 +157,11 @@ void Server::set_player_after_collision(int client_id){
 
 void Server::send_data(int client_id){
     while(connected_clients[client_id] && server_running){
+        sem_wait(&send_start);
         set_client_board(client_id);
         clients[client_id].round_nr = round_number;
         send(clients[client_id].client_port, &clients[client_id], sizeof(struct client_struct), 0);
-        sleep(1);
+        sem_post(&send_end);
     }
 }
 
@@ -166,7 +171,7 @@ void Server::set_client(int client_id, int socket_id){
     clients[client_id].player_id = client_id;
     clients[client_id].client_port = socket_id;
     while(true){
-        int x = rand() % (BOARD_COLS - 2) + 1; // todo rand omijajacy playerow
+        int x = rand() % (BOARD_COLS - 2) + 1;
         int y = rand() % (BOARD_ROWS - 2) + 1;
         if(board[y][x] == FREE && board[y][x+1] == FREE){
             clients[client_id].spawn_position.y = y;
@@ -180,10 +185,11 @@ void Server::set_client(int client_id, int socket_id){
     clients[client_id].coins_brought = 0;
     clients[client_id].deaths = 0;
     clients[client_id].slowed = false;
+    clients[client_id].isMoving = false;
     set_client_board(client_id);
 }
 
-void Server::set_client_board(int client_id){
+void Server::set_client_board(int client_id){ // set array in struct that will be sent to client and displayed by him
     int first_x = clients[client_id].player.left.x - CLIENT_COLS / 2 + 1;
     int first_y = clients[client_id].player.left.y - CLIENT_ROWS / 2;
     for(int i = 0; i < CLIENT_ROWS; i++){
@@ -220,7 +226,7 @@ void Server::set_client_board(int client_id){
     }
 }
 
-void Server::move_player(int client_id, int input){
+bool Server::move_player(int client_id, int input){
     Point point, left, right;
     switch (input) {
         case KEY_UP:
@@ -253,6 +259,7 @@ void Server::move_player(int client_id, int input){
                 }
                 clients[client_id].player.left = left;
                 clients[client_id].player.right = right;
+                return true;
             }
             break;
         case KEY_LEFT:
@@ -266,6 +273,7 @@ void Server::move_player(int client_id, int input){
                 }
                 clients[client_id].player.left = left;
                 clients[client_id].player.right = right;
+                return true;
             }
             break;
         case KEY_RIGHT:
@@ -279,21 +287,49 @@ void Server::move_player(int client_id, int input){
                 }
                 clients[client_id].player.left = left;
                 clients[client_id].player.right = right;
+                return true;
             }
             break;
         default:
             break;
     }
+    return false;
 }
 
-void Server::paint_all(){
+void Server::paint_all(){ // main loop where all is done
     while(server_running){
+        move_players();
+        move_beasts();
         paint_board();
         paint_scoreboard();
         paint_players();
         paint_beasts();
+        send_all_data();
         new_round();
-        sleep(1);
+        usleep(500 * 1000);
+    }
+}
+
+void Server::move_players() {
+    for(int i = 0; i < CLIENT_LIMIT; i++){
+        if(connected_clients[i] && clients[i].isMoving){
+            sem_post(&clients_start[i]);
+            sem_wait(&clients_end[i]);
+        }
+    }
+}
+
+void Server::move_beasts() {
+    for(int i = 0; i < beasts.size(); i++){
+        sem_post(&beast_start);
+        sem_wait(&beast_end);
+    }
+}
+
+void Server::send_all_data(){
+    for(int i = 0; i < count_clients_connected(); i++){
+        sem_post(&send_start);
+        sem_wait(&send_end);
     }
 }
 
@@ -303,14 +339,12 @@ void Server::start(Server *server) {
     while(server_running){
         int input = getch();
         flushinp();
-
         if(input == 'q' || input == 'Q'){
             server_running = false;
             break;
         }
         handle_input(server, input);
     }
-
 }
 
 void Server::new_round(){
@@ -318,11 +352,18 @@ void Server::new_round(){
 }
 
 Server::~Server() {
-    sem_destroy(&client_sem);
-    sem_destroy(&beast_sem);
-    sem_destroy(&client_count);
-    sem_destroy(&beast_count);
-    pthread_mutex_destroy(&data);
+    sem_destroy(&beast_start);
+    sem_destroy(&beast_end);
+    sem_destroy(&send_start);
+    sem_destroy(&send_end);
+    sem_destroy(&clients_start[0]);
+    sem_destroy(&clients_start[1]);
+    sem_destroy(&clients_start[2]);
+    sem_destroy(&clients_start[3]);
+    sem_destroy(&clients_end[0]);
+    sem_destroy(&clients_end[1]);
+    sem_destroy(&clients_end[2]);
+    sem_destroy(&clients_end[3]);
 }
 
 int Server::init() {
@@ -341,11 +382,18 @@ int Server::init() {
 }
 
 void Server::set_semaphores(){
-    sem_init(&client_sem, 0 , 0);
-    sem_init(&beast_sem, 0 , 0);
-    sem_init(&client_count, 0 , 0);
-    sem_init(&beast_count, 0 , 0);
-    pthread_mutex_init(&data, NULL);
+    sem_init(&beast_start, 0 , 0);
+    sem_init(&beast_end, 0 , 0);
+    sem_init(&send_start, 0 , 0);
+    sem_init(&send_end, 0 , 0);
+    sem_init(&clients_start[0], 0 , 0);
+    sem_init(&clients_start[1], 0 , 0);
+    sem_init(&clients_start[2], 0 , 0);
+    sem_init(&clients_start[3], 0 , 0);
+    sem_init(&clients_end[0], 0 , 0);
+    sem_init(&clients_end[1], 0 , 0);
+    sem_init(&clients_end[2], 0 , 0);
+    sem_init(&clients_end[3], 0 , 0);
 }
 
 void Server::set_campsite(){
@@ -358,7 +406,6 @@ void Server::init_window(){
     cbreak();
     keypad(stdscr, TRUE);
     noecho();
-    //nodelay(stdscr, TRUE); // disable waiting for input
     curs_set(0);
     srand(time(NULL));
 }
@@ -731,28 +778,22 @@ void Server::handle_input(Server *server, int input) {
 }
 
 void Server::add_beast(Server *server) {
-    int x = rand() % (BOARD_COLS - 2) + 1; // todo rand omijajacy playerow
-    int y = rand() % (BOARD_ROWS - 2) + 1;
-    if(board[y][x] == FREE && board[y][x+1] == FREE){
-        threads_beast.emplace_back(std::thread(&Server::move_beast, server, x, y));
-        threads_beast.back().detach();
-    }
-    else
-        add_beast(server);
+    Point spot = get_free_spot();
+    threads_beast.emplace_back(std::thread(&Server::move_beast, server, spot.x, spot.y));
+    threads_beast.back().detach();
 }
 
 void Server::move_beast(int x, int y){
+    int beast_id = beasts.size();
     beasts.emplace_back(MovingObject(x, y));
-    MovingObject &beast = beasts.back();
-    //sem_post(&beast_count);
     while(server_running){
-        int player_id = player_is_seen(beast);
+        sem_wait(&beast_start);
+        int player_id = player_is_seen(beasts.at(beast_id));
         if(player_id != -1){
-            move_towards_player(beast, player_id);
-            //sem_wait(&beast_sem);
-            check_beast_collision(beast, player_id);
+            move_towards_player(beasts.at(beast_id), player_id);
+            check_beast_collision(beasts.at(beast_id), player_id);
         }
-        sleep(1);
+        sem_post(&beast_end);
     }
 }
 
@@ -902,17 +943,12 @@ void Server::move_towards_player(MovingObject &beast, int player_id){
 void Server::add_collectible(int value) {
     if(!value)
         return;
-    int x = rand() % (BOARD_COLS - 2) + 1; // todo dodac rand omijajacych playerow i dla bestii
-    int y = rand() % (BOARD_ROWS - 2) + 1;
-    if(board[y][x] == FREE){
-        add_collectible(x, y, value);
-    }
-    else
-        add_collectible(value);
+    Point spot = get_free_spot();
+    add_collectible(spot.x, spot.y, value);
 }
 
 void Server::add_collectible(int x, int y, int value){
-    if(board[y][x] == FREE && value){
+    if(value){
         coins.emplace_back(Collectible(x, y, value));
         if(value == 1)
             board[y][x] = COIN;
@@ -923,4 +959,31 @@ void Server::add_collectible(int x, int y, int value){
         else
             board[y][x] = TREASURE_DROP;
     }
+}
+
+Point Server::get_free_spot() {
+    int x = rand() % (BOARD_COLS - 2) + 1;
+    int y = rand() % (BOARD_ROWS - 2) + 1;
+    Point spot = Point(x, y);
+    Point spot_right = spot += Point(1, 0);
+    if(board[y][x] != FREE || board[y][x+1] != FREE)
+        return get_free_spot();
+    for(int i = 0; i < CLIENT_LIMIT; i++){
+        if(connected_clients[i]){
+            if(clients[i].player.left == spot || clients[i].player.right == spot || spot_right == clients[i].player.left){
+                return get_free_spot();
+            }
+        }
+    }
+    for(auto &beast : beasts){
+        if(spot == beast.left || spot == beast.right || spot_right == beast.left){
+            return get_free_spot();
+        }
+    }
+    for(auto &coin : coins){
+        if(spot == coin.point || spot_right == coin.point){
+            return get_free_spot();
+        }
+    }
+    return spot;
 }

@@ -2,6 +2,7 @@
 #define __CLIENT__
 
 #include "client_struct.h"
+#include <arpa/inet.h>
 
 #define SERVER_PORT 8989
 #define SOCKET_ERROR -1
@@ -38,6 +39,7 @@ class Client{
         void print_scoreboard();
         void print_board();
         void receiver();
+        void clear_board();
 };
 
 #endif

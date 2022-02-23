@@ -12,6 +12,7 @@ struct client_struct{
     int coins_brought = 0;
     int deaths = 0;
     bool slowed = false;
+    bool isMoving = false;
     MovingObject player;
     Point spawn_position;
     char player_board[5][10] = {0};

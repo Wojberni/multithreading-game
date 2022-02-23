@@ -4,11 +4,11 @@
 This game is a classic treasure hunt game. The difference is we have a server and clients, so we can play with our friends. The goal is to bring as many coins as you can to the campsite. Good luck on your treasure hunting!
 ## Screenshots
 
-![Client](https://via.placeholder.com/468x300?text=App+Screenshot+Here)
+![Client](https://github.com/Wojberni/multithreading-game/blob/feature/cgame/client.png?raw=true)
 
 Client's view
 
-![Server](https://via.placeholder.com/468x300?text=App+Screenshot+Here)
+![Server](https://github.com/Wojberni/multithreading-game/blob/feature/cgame/server.png?raw=true)
 
 Server's view
 ## Tech Stack
